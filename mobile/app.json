@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "DisciplineOS",
+    "slug": "disciplineos",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "disciplineos",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.disciplineos.app",
+      "permissions": [
+        "POST_NOTIFICATIONS",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_FULL_SCREEN_INTENT",
+        "WAKE_LOCK"
+      ]
+    },
+    "plugins": [
+      "expo-notifications"
+    ]
+  }
+}

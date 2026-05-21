@@ -1,0 +1,22 @@
+{
+  "name": "disciplineos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-powered productivity and accountability operating system for web and mobile.",
+  "scripts": {
+    "dev:web": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:mobile": "npm --prefix mobile run start",
+    "build:web": "npm --prefix frontend run build",
+    "lint:web": "npm --prefix frontend run lint",
+    "lint:backend": "npm --prefix backend run lint"
+  },
+  "workspaces": [
+    "backend",
+    "frontend",
+    "mobile"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}
