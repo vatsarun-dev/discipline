@@ -1,7 +1,9 @@
 import axios from 'axios';
 
+const apiBaseUrl = (import.meta.env.VITE_API_URL || 'https://discipline-zgl3.onrender.com/api').replace(/\/$/, '');
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+  baseURL: apiBaseUrl
 });
 
 api.interceptors.request.use((config) => {
