@@ -24,3 +24,4 @@
 - Sanitized `backend/.env.example` so real secrets are not stored in the example file.
 - Upgraded reminder processing to generate AI accountability text and ElevenLabs voice audio for due reminders.
 - Added `POST /api/notifications/process-due` for manual due reminder processing during web testing.
+- Pointed the frontend default API base URL to the deployed Render backend and added `frontend/.env.example`.

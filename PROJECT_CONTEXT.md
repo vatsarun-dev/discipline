@@ -18,6 +18,7 @@ DisciplineOS is a futuristic AI accountability operating system for users who st
 - Backend includes modular Express architecture, MongoDB models, JWT auth, task CRUD, activity CRUD, AI personality CRUD, analytics, notification CRUD, AI coaching, Notion, ElevenLabs, and Firebase service boundaries.
 - Due reminders are processed by a one-minute reminder sweep. The sweep generates AI accountability text, synthesizes ElevenLabs voice when configured, persists the generated voice cache URL, and optionally sends high-priority FCM if a device token exists.
 - Frontend is a Vercel-style authenticated console with real Axios integration, token persistence, session restoration, protected app state, Overview, Tasks, AI Coach, Analytics, and Alarms pages.
+- Frontend defaults to the deployed Render API at `https://discipline-zgl3.onrender.com/api`; override with `VITE_API_URL` when using a local backend.
 - Web core data now comes from the backend: tasks, activities, analytics, personalities, and notifications are loaded from MongoDB-backed APIs.
 - Mobile includes an Expo shell with dashboard and fullscreen alarm screen concepts; native notification execution still needs full API synchronization.
 
