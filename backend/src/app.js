@@ -18,7 +18,7 @@ import { activityRoutes } from './routes/activityRoutes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.resolve(__dirname, '..');
-const audioAssetsRoot = path.resolve(backendRoot, '..', 'assets', 'audio');
+const audioAssetsRoot = path.resolve(backendRoot, 'assets', 'audio');
 
 export function createApp() {
   const app = express();

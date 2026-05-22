@@ -4,8 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, '../../..');
-const audioRoot = path.join(repoRoot, 'assets', 'audio');
+const backendRoot = path.resolve(__dirname, '../..');
+const audioRoot = path.join(backendRoot, 'assets', 'audio');
 const audioCount = 8;
 
 export const reminderStages = ['first-reminder', 'second-reminder', 'final-reminder'];
