@@ -146,8 +146,8 @@ export function App() {
       <div className="min-h-screen lg:pl-64">
         <Sidebar activePage={activePage} onNavigate={setActivePage} user={session.user} onLogout={logout} />
         <section className="min-w-0 flex-1">
-          <TopBar activePage={activePage} loading={loading} onRefresh={loadAppData} />
-          <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <TopBar activePage={activePage} loading={loading} onRefresh={loadAppData} onLogout={logout} />
+          <div className="mx-auto max-w-7xl px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-6">
             {error && <Alert>{error}</Alert>}
             {activePage === 'command' && <OverviewPage data={state} actions={actions} onAlarm={setAlarmTask} />}
             {activePage === 'tasks' && <TasksPage tasks={state.tasks} actions={actions} />}
@@ -157,6 +157,7 @@ export function App() {
           </div>
         </section>
       </div>
+      <MobileNav activePage={activePage} onNavigate={setActivePage} />
       {alarmTask && <AlarmOverlay task={alarmTask} onClose={() => setAlarmTask(null)} onComplete={() => actions.completeTask(alarmTask._id).then(() => setAlarmTask(null))} />}
     </main>
   );
@@ -239,18 +240,46 @@ function Sidebar({ activePage, onNavigate, user, onLogout }) {
   );
 }
 
-function TopBar({ activePage, loading, onRefresh }) {
+function MobileNav({ activePage, onNavigate }) {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[#1d1d1d] bg-black/95 px-2 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] pt-2 backdrop-blur lg:hidden">
+      <div className="mx-auto grid max-w-lg grid-cols-5 gap-1">
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = activePage === item.id;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onNavigate(item.id)}
+              aria-current={isActive ? 'page' : undefined}
+              className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-md px-1 text-[11px] font-medium transition ${isActive ? 'bg-white text-black' : 'text-[#a1a1a1] hover:bg-[#111] hover:text-white'}`}
+            >
+              <Icon className="h-4 w-4" />
+              <span className="max-w-full truncate">{item.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
+function TopBar({ activePage, loading, onRefresh, onLogout }) {
   const page = navItems.find((item) => item.id === activePage);
   return (
     <header className="sticky top-0 z-20 border-b border-[#1d1d1d] bg-black/80 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs text-[#858585]">DisciplineOS / {page?.label}</p>
           <h2 className="text-xl font-semibold tracking-normal">{page?.label}</h2>
         </div>
         <div className="flex items-center gap-2">
           <div className="hidden h-9 items-center gap-2 rounded-md border border-[#2a2a2a] bg-[#0a0a0a] px-3 text-sm text-[#858585] md:flex"><Search className="h-4 w-4" />API connected</div>
           <button onClick={onRefresh} disabled={loading} className="h-9 rounded-md border border-[#2a2a2a] px-3 text-sm text-[#d4d4d4] disabled:opacity-50">{loading ? 'Refreshing...' : 'Refresh'}</button>
+          <button onClick={onLogout} className="grid h-9 w-9 place-items-center rounded-md border border-[#2a2a2a] text-[#d4d4d4] hover:bg-[#111] lg:hidden" aria-label="Logout">
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </header>
