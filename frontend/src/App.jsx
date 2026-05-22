@@ -174,7 +174,13 @@ function AuthScreen({ onSession }) {
     setLoading(true);
     setError('');
     try {
-      const response = mode === 'login' ? await authApi.login(form) : await authApi.signup(form);
+      const payload = {
+        email: form.email.trim(),
+        password: form.password
+      };
+      const response = mode === 'login'
+        ? await authApi.login(payload)
+        : await authApi.signup({ ...payload, name: form.name.trim() });
       localStorage.setItem('disciplineos_token', response.token);
       onSession({ user: response.user, token: response.token });
     } catch (err) {
@@ -202,9 +208,9 @@ function AuthScreen({ onSession }) {
             </button>
           ))}
         </div>
-        {mode === 'signup' && <Field label="Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} required />}
+        {mode === 'signup' && <Field label="Name" value={form.name} onChange={(value) => setForm({ ...form, name: value })} minLength={2} required />}
         <Field label="Email" type="email" value={form.email} onChange={(value) => setForm({ ...form, email: value })} required />
-        <Field label="Password" type="password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} required />
+        <Field label="Password" type="password" value={form.password} onChange={(value) => setForm({ ...form, password: value })} minLength={mode === 'signup' ? 8 : undefined} required />
         <button disabled={loading} className="mt-4 h-10 w-full rounded-md bg-white text-sm font-medium text-black disabled:opacity-50">
           {loading ? 'Working...' : mode === 'login' ? 'Login' : 'Create account'}
         </button>
@@ -537,8 +543,8 @@ function Panel({ title, action, children }) {
   return <section className="rounded-lg border border-[#1d1d1d] bg-[#050505]"><div className="flex items-center justify-between border-b border-[#1d1d1d] px-5 py-4"><h3 className="font-semibold">{title}</h3><span className="text-sm text-[#858585]">{action}</span></div><div className="p-5">{children}</div></section>;
 }
 
-function Field({ label, value, onChange, type = 'text', required = false }) {
-  return <label className="block text-sm"><span className="mb-1 block text-[#858585]">{label}</span><input required={required} type={type} value={value} onChange={(event) => onChange(event.target.value)} className="h-10 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-white outline-none focus:border-white/50" /></label>;
+function Field({ label, value, onChange, type = 'text', required = false, minLength }) {
+  return <label className="block text-sm"><span className="mb-1 block text-[#858585]">{label}</span><input required={required} minLength={minLength} type={type} value={value} onChange={(event) => onChange(event.target.value)} className="h-10 w-full rounded-md border border-[#2a2a2a] bg-black px-3 text-white outline-none focus:border-white/50" /></label>;
 }
 
 function Select({ label, value, onChange, options, labels = {} }) {
