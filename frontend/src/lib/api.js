@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const apiBaseUrl = (import.meta.env.VITE_API_URL || 'https://discipline-zgl3.onrender.com/api').replace(/\/$/, '');
+export const apiBaseUrl = (import.meta.env.VITE_API_URL || 'https://discipline-zgl3.onrender.com/api').replace(/\/$/, '');
+const assetBaseUrl = apiBaseUrl.replace(/\/api$/, '');
 
 export const api = axios.create({
   baseURL: apiBaseUrl
@@ -53,14 +54,6 @@ export const analyticsApi = {
   heatmap: () => api.get('/analytics/heatmap').then((response) => response.data.heatmap)
 };
 
-export const aiApi = {
-  personalities: () => api.get('/ai/personalities').then((response) => response.data.personalities),
-  createPersonality: (payload) => api.post('/ai/personalities', payload).then((response) => response.data.personality),
-  updatePersonality: (id, payload) => api.patch(`/ai/personalities/${id}`, payload).then((response) => response.data.personality),
-  deletePersonality: (id) => api.delete(`/ai/personalities/${id}`),
-  coach: (payload) => api.post('/ai/coach', payload).then((response) => response.data.response)
-};
-
 export const notificationsApi = {
   list: () => api.get('/notifications').then((response) => response.data.notifications),
   schedule: (payload) => api.post('/notifications/schedule', payload).then((response) => response.data.notification),
@@ -70,3 +63,9 @@ export const notificationsApi = {
   acknowledge: (id) => api.post(`/notifications/${id}/acknowledge`).then((response) => response.data.notification),
   processDue: () => api.post('/notifications/process-due').then((response) => response.data)
 };
+
+export function resolveAssetUrl(value) {
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value)) return value;
+  return `${assetBaseUrl}${value.startsWith('/') ? value : `/${value}`}`;
+}

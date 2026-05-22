@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlarmClock,
   BarChart3,
   BellRing,
-  Bot,
   Check,
   ChevronRight,
   CircleDot,
@@ -20,12 +19,12 @@ import {
   Zap
 } from 'lucide-react';
 import { Area, AreaChart, Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { activitiesApi, aiApi, analyticsApi, authApi, notificationsApi, tasksApi } from './lib/api.js';
+import { activitiesApi, analyticsApi, authApi, notificationsApi, resolveAssetUrl, tasksApi } from './lib/api.js';
+import { useNotificationStore } from './store/notificationStore.js';
 
 const navItems = [
   { id: 'command', icon: LayoutDashboard, label: 'Overview' },
   { id: 'tasks', icon: Check, label: 'Tasks' },
-  { id: 'coach', icon: Bot, label: 'AI Coach' },
   { id: 'analytics', icon: BarChart3, label: 'Analytics' },
   { id: 'alarms', icon: BellRing, label: 'Alarms' }
 ];
@@ -50,7 +49,6 @@ export function App() {
   const [state, setState] = useState({
     tasks: [],
     activities: [],
-    personalities: [],
     notifications: [],
     summary: emptySummary,
     weekly: [],
@@ -59,34 +57,39 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [alarmTask, setAlarmTask] = useState(null);
+  const [alarmNotification, setAlarmNotification] = useState(null);
+  const seenAlarmIds = useRef(new Set(JSON.parse(localStorage.getItem('disciplineos_seen_alarms') || '[]')));
+  const syncReminderStates = useNotificationStore((store) => store.syncReminderStates);
+  const openGlobalAlarm = useNotificationStore((store) => store.openAlarm);
+  const closeGlobalAlarm = useNotificationStore((store) => store.closeAlarm);
 
   const logout = useCallback(() => {
     localStorage.removeItem('disciplineos_token');
     setSession({ user: null, token: null });
-    setState({ tasks: [], activities: [], personalities: [], notifications: [], summary: emptySummary, weekly: [], heatmap: [] });
+    setState({ tasks: [], activities: [], notifications: [], summary: emptySummary, weekly: [], heatmap: [] });
   }, []);
 
   const loadAppData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [tasks, activities, personalities, notifications, summary, weekly, heatmap] = await Promise.all([
+      const [tasks, activities, notifications, summary, weekly, heatmap] = await Promise.all([
         tasksApi.list(),
         activitiesApi.list(),
-        aiApi.personalities(),
         notificationsApi.list(),
         analyticsApi.summary(),
         analyticsApi.weekly(),
         analyticsApi.heatmap()
       ]);
-      setState({ tasks, activities, personalities, notifications, summary, weekly, heatmap });
+      setState({ tasks, activities, notifications, summary, weekly, heatmap });
+      syncReminderStates(notifications);
     } catch (err) {
       setError(err.message);
       if (err.message.toLowerCase().includes('authorization') || err.message.toLowerCase().includes('session')) logout();
     } finally {
       setLoading(false);
     }
-  }, [logout]);
+  }, [logout, syncReminderStates]);
 
   useEffect(() => {
     async function restoreSession() {
@@ -107,8 +110,9 @@ export function App() {
     restoreSession();
   }, [loadAppData, logout, session.token]);
 
-  async function runMutation(action) {
+  async function runMutation(action, optimistic) {
     setError('');
+    if (optimistic) optimistic();
     try {
       await action();
       await loadAppData();
@@ -117,23 +121,77 @@ export function App() {
     }
   }
 
+  useEffect(() => {
+    if (!session.user) return undefined;
+
+    const pollDueReminders = async () => {
+      try {
+        await notificationsApi.processDue();
+        await loadAppData();
+      } catch (err) {
+        setError(err.message);
+      }
+    };
+
+    pollDueReminders();
+    const id = window.setInterval(pollDueReminders, 20000);
+    return () => window.clearInterval(id);
+  }, [loadAppData, session.user]);
+
+  useEffect(() => {
+    if (!session.user) return;
+
+    const nextAlarm = [...state.notifications]
+      .filter((notification) => notification.status === 'sent' && notification.sentAt && !seenAlarmIds.current.has(notification._id))
+      .sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt))[0];
+
+    if (!nextAlarm) return;
+    if (alarmNotification && new Date(nextAlarm.sentAt) <= new Date(alarmNotification.sentAt || 0)) return;
+    const task = state.tasks.find((item) => item._id === nextAlarm.taskId);
+    setAlarmNotification(nextAlarm);
+    setAlarmTask(task || { title: 'DisciplineOS reminder', reminderTime: nextAlarm.scheduledFor });
+    openGlobalAlarm(nextAlarm);
+  }, [alarmNotification, openGlobalAlarm, session.user, state.notifications, state.tasks]);
+
+  const rememberAlarmSeen = useCallback((id) => {
+    if (!id) return;
+    seenAlarmIds.current.add(id);
+    localStorage.setItem('disciplineos_seen_alarms', JSON.stringify([...seenAlarmIds.current].slice(-100)));
+  }, []);
+
+  const openAlarm = useCallback((task, notification = null) => {
+    setAlarmNotification(notification);
+    setAlarmTask(task || { title: 'DisciplineOS reminder', reminderTime: notification?.scheduledFor });
+    if (notification) openGlobalAlarm(notification);
+  }, [openGlobalAlarm]);
+
   if (booting) return <ScreenMessage title="Loading DisciplineOS" body="Restoring your secure session." />;
   if (!session.user) return <AuthScreen onSession={(nextSession) => setSession(nextSession)} />;
 
   const actions = {
     refresh: loadAppData,
-    createTask: (payload) => runMutation(() => tasksApi.create(payload)),
+    createTask: (payload) => runMutation(
+      () => tasksApi.create(payload),
+      () => setState((current) => ({
+        ...current,
+        tasks: [{ ...payload, _id: `optimistic-${Date.now()}`, completionStatus: 'pending', streakCount: 0 }, ...current.tasks]
+      }))
+    ),
     updateTask: (id, payload) => runMutation(() => tasksApi.update(id, payload)),
     deleteTask: (id) => runMutation(() => tasksApi.remove(id)),
-    completeTask: (id) => runMutation(() => tasksApi.complete(id)),
+    completeTask: (id) => runMutation(
+      () => tasksApi.complete(id),
+      () => setState((current) => ({
+        ...current,
+        tasks: current.tasks.map((task) => task._id === id ? { ...task, completionStatus: 'completed', streakCount: (task.streakCount || 0) + 1, completedAt: new Date().toISOString() } : task),
+        notifications: current.notifications.map((notification) => notification.taskId === id && ['scheduled', 'snoozed', 'sent'].includes(notification.status) ? { ...notification, status: 'cancelled', completed: true } : notification)
+      }))
+    ),
     markMissed: (id) => runMutation(() => tasksApi.missed(id)),
     snoozeTask: (id) => runMutation(() => tasksApi.snooze(id)),
     createActivity: (payload) => runMutation(() => activitiesApi.create(payload)),
     updateActivity: (id, payload) => runMutation(() => activitiesApi.update(id, payload)),
     deleteActivity: (id) => runMutation(() => activitiesApi.remove(id)),
-    createPersonality: (payload) => runMutation(() => aiApi.createPersonality(payload)),
-    updatePersonality: (id, payload) => runMutation(() => aiApi.updatePersonality(id, payload)),
-    deletePersonality: (id) => runMutation(() => aiApi.deletePersonality(id)),
     scheduleNotification: (payload) => runMutation(() => notificationsApi.schedule(payload)),
     processDueNotifications: () => runMutation(() => notificationsApi.processDue()),
     deleteNotification: (id) => runMutation(() => notificationsApi.remove(id)),
@@ -149,16 +207,46 @@ export function App() {
           <TopBar activePage={activePage} loading={loading} onRefresh={loadAppData} onLogout={logout} />
           <div className="mx-auto max-w-7xl px-4 pb-28 pt-6 sm:px-6 lg:px-8 lg:pb-6">
             {error && <Alert>{error}</Alert>}
-            {activePage === 'command' && <OverviewPage data={state} actions={actions} onAlarm={setAlarmTask} />}
+            {activePage === 'command' && <OverviewPage data={state} actions={actions} onAlarm={openAlarm} />}
             {activePage === 'tasks' && <TasksPage tasks={state.tasks} actions={actions} />}
-            {activePage === 'coach' && <CoachPage tasks={state.tasks} personalities={state.personalities} actions={actions} />}
             {activePage === 'analytics' && <AnalyticsPage summary={state.summary} weekly={state.weekly} heatmap={state.heatmap} />}
-            {activePage === 'alarms' && <AlarmsPage tasks={state.tasks} notifications={state.notifications} actions={actions} onAlarm={setAlarmTask} />}
+            {activePage === 'alarms' && <AlarmsPage tasks={state.tasks} notifications={state.notifications} actions={actions} onAlarm={openAlarm} />}
           </div>
         </section>
       </div>
       <MobileNav activePage={activePage} onNavigate={setActivePage} />
-      {alarmTask && <AlarmOverlay task={alarmTask} onClose={() => setAlarmTask(null)} onComplete={() => actions.completeTask(alarmTask._id).then(() => setAlarmTask(null))} />}
+      {alarmTask && (
+        <AlarmOverlay
+          task={alarmTask}
+          notification={alarmNotification}
+          onClose={() => {
+            rememberAlarmSeen(alarmNotification?._id);
+            if (alarmNotification?._id) actions.acknowledgeNotification(alarmNotification._id);
+            setAlarmNotification(null);
+            setAlarmTask(null);
+            closeGlobalAlarm();
+          }}
+          onSnooze={() => {
+            rememberAlarmSeen(alarmNotification?._id);
+            const action = alarmNotification?._id ? actions.snoozeNotification(alarmNotification._id) : actions.snoozeTask(alarmTask._id);
+            action.then(() => {
+              setAlarmNotification(null);
+              setAlarmTask(null);
+              closeGlobalAlarm();
+            });
+          }}
+          onComplete={() => {
+            rememberAlarmSeen(alarmNotification?._id);
+            const completion = alarmTask?._id ? actions.completeTask(alarmTask._id) : Promise.resolve();
+            completion.then(async () => {
+              if (alarmNotification?._id) await notificationsApi.acknowledge(alarmNotification._id);
+              setAlarmNotification(null);
+              setAlarmTask(null);
+              closeGlobalAlarm();
+            });
+          }}
+        />
+      )}
     </main>
   );
 }
@@ -298,7 +386,7 @@ function OverviewPage({ data, actions, onAlarm }) {
       <Hero summary={data.summary} />
       <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
         <Panel title="Active Commitments" action={`${data.tasks.length} tasks`}>
-          <TaskTable tasks={data.tasks.slice(0, 6)} actions={actions} onAlarm={onAlarm} compact />
+          <TaskTableV2 tasks={data.tasks.slice(0, 6)} actions={actions} onAlarm={onAlarm} compact />
         </Panel>
         <Panel title="AI Insights" action="Mongo context">
           {data.summary.insights?.length ? data.summary.insights.map((insight) => <MetricRow key={insight} label="Insight" value={insight} />) : <EmptyState text="No insights yet. Complete or miss tasks to build behavioral context." />}
@@ -358,43 +446,7 @@ function TasksPage({ tasks, actions }) {
         </form>
       </Panel>
       <Panel title="Task Registry" action={`${tasks.length} records`}>
-        <TaskTable tasks={tasks} actions={actions} />
-      </Panel>
-    </div>
-  );
-}
-
-function CoachPage({ tasks, personalities, actions }) {
-  const [taskId, setTaskId] = useState('');
-  const [personalityId, setPersonalityId] = useState('');
-  const [message, setMessage] = useState('');
-  const [draft, setDraft] = useState({ name: '', tone: '', speakingStyle: '', motivationalStyle: '', aggressionLevel: 5, voiceType: 'balanced' });
-  const selectedPersonality = personalities.find((item) => String(item._id || item.name) === personalityId);
-
-  async function generateCoach() {
-    const response = await aiApi.coach({ taskId: taskId || undefined, personality: selectedPersonality });
-    setMessage(response.text);
-  }
-
-  return (
-    <div className="grid gap-6 xl:grid-cols-[1fr_0.85fr]">
-      <Panel title="AI Accountability Session" action="Gemini">
-        <div className="space-y-3">
-          <Select label="Task context" value={taskId} onChange={setTaskId} options={['', ...tasks.map((task) => task._id)]} labels={{ '': 'No task selected', ...Object.fromEntries(tasks.map((task) => [task._id, task.title])) }} />
-          <Select label="Personality" value={personalityId} onChange={setPersonalityId} options={['', ...personalities.map((item) => String(item._id || item.name))]} labels={{ '': 'Default coach', ...Object.fromEntries(personalities.map((item) => [String(item._id || item.name), item.name])) }} />
-          <button onClick={generateCoach} className="rounded-md bg-white px-4 py-2 text-sm font-medium text-black">Generate Coaching</button>
-          <div className="min-h-28 rounded-lg border border-[#2a2a2a] bg-[#0a0a0a] p-5 text-sm leading-6 text-[#d4d4d4]">{message || 'Generate a real AI coaching response from your task and behavior history.'}</div>
-        </div>
-      </Panel>
-      <Panel title="Personality CRUD" action="MongoDB">
-        <form onSubmit={(event) => { event.preventDefault(); actions.createPersonality(draft); setDraft({ name: '', tone: '', speakingStyle: '', motivationalStyle: '', aggressionLevel: 5, voiceType: 'balanced' }); }} className="mb-5 space-y-3">
-          <Field label="Name" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} required />
-          <Field label="Tone" value={draft.tone} onChange={(value) => setDraft({ ...draft, tone: value })} required />
-          <Field label="Speaking style" value={draft.speakingStyle} onChange={(value) => setDraft({ ...draft, speakingStyle: value })} required />
-          <Field label="Motivational style" value={draft.motivationalStyle} onChange={(value) => setDraft({ ...draft, motivationalStyle: value })} required />
-          <button className="rounded-md bg-white px-4 py-2 text-sm font-medium text-black">Save Personality</button>
-        </form>
-        <div className="space-y-2">{personalities.map((item) => <div key={item._id || item.name} className="flex items-center justify-between rounded-md border border-[#1d1d1d] p-3"><span>{item.name}</span>{!item.isDefault && <button onClick={() => actions.deletePersonality(item._id)} className="text-[#fca5a5]"><Trash2 className="h-4 w-4" /></button>}</div>)}</div>
+        <TaskTableV2 tasks={tasks} actions={actions} />
       </Panel>
     </div>
   );
@@ -442,8 +494,8 @@ function AlarmsPage({ tasks, notifications, actions, onAlarm }) {
             const task = tasks.find((item) => item._id === notification.taskId);
             return (
               <div key={notification._id} className="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between">
-                <div className="flex min-w-0 items-start gap-3"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#2a2a2a]"><Clock className="h-4 w-4" /></div><div className="min-w-0"><p className="font-medium">{task?.title || 'General reminder'}</p><p className="text-sm text-[#858585]">{formatDate(notification.scheduledFor)} · {notification.status}</p>{notification.aiMessage && <p className="mt-2 max-w-2xl text-sm leading-6 text-[#d4d4d4]">{notification.aiMessage}</p>}{notification.voiceCacheUrl && <a className="mt-2 inline-block text-sm text-white underline" href={notification.voiceCacheUrl} target="_blank" rel="noreferrer">Play generated voice</a>}{notification.lastError && <p className="mt-2 text-sm text-red-300">{notification.lastError}</p>}</div></div>
-                <div className="flex gap-2"><button onClick={() => actions.snoozeNotification(notification._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm">Snooze</button><button onClick={() => actions.deleteNotification(notification._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-[#fca5a5]">Delete</button><button onClick={() => onAlarm(task || null)} className="rounded-md bg-white px-3 py-2 text-sm font-medium text-black">Preview</button></div>
+                <div className="flex min-w-0 items-start gap-3"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-md border border-[#2a2a2a]"><Clock className="h-4 w-4" /></div><div className="min-w-0"><p className="font-medium">{task?.title || 'General reminder'}</p><p className="text-sm text-[#858585]">{formatDate(notification.scheduledFor)} · {notification.status} · {notification.reminderStage || 'first-reminder'}</p>{notification.aiMessage && <p className="mt-2 max-w-2xl text-sm leading-6 text-[#d4d4d4]">{notification.aiMessage}</p>}{notification.voiceCacheUrl && <a className="mt-2 inline-block text-sm text-white underline" href={resolveAssetUrl(notification.voiceCacheUrl)} target="_blank" rel="noreferrer">Play AI voice</a>}{notification.lastError && <p className="mt-2 text-sm text-red-300">{notification.lastError}</p>}</div></div>
+                <div className="flex gap-2"><button onClick={() => actions.snoozeNotification(notification._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm">Snooze</button><button onClick={() => actions.deleteNotification(notification._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-[#fca5a5]">Delete</button><button onClick={() => onAlarm(task || null, notification)} className="rounded-md bg-white px-3 py-2 text-sm font-medium text-black">Preview</button></div>
               </div>
             );
           }) : <EmptyState text="No reminders scheduled." />}
@@ -463,6 +515,42 @@ function TaskTable({ tasks, actions, onAlarm, compact = false }) {
           <div className="flex flex-wrap gap-2"><button onClick={() => actions.completeTask(task._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm">Complete</button>{!compact && <button onClick={() => actions.markMissed(task._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm">Missed</button>}{!compact && <button onClick={() => actions.snoozeTask(task._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm">Snooze</button>}{onAlarm && <button onClick={() => onAlarm(task)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm">Alarm</button>}{!compact && <button onClick={() => actions.deleteTask(task._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-[#fca5a5]"><Trash2 className="h-4 w-4" /></button>}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function TaskTableV2({ tasks, actions, onAlarm, compact = false }) {
+  if (!tasks.length) return <EmptyState text="No tasks found. Create a commitment to begin collecting real analytics." />;
+
+  return (
+    <div className="overflow-hidden rounded-md border border-[#1d1d1d]">
+      {tasks.map((task) => {
+        const isCompleted = task.completionStatus === 'completed';
+        const actionClass = 'rounded-md border border-[#2a2a2a] px-3 py-2 text-sm disabled:cursor-not-allowed disabled:border-emerald-400/20 disabled:bg-emerald-500/10 disabled:text-emerald-200/70 disabled:opacity-80';
+
+        return (
+          <div key={task._id} className={`grid gap-3 border-b p-4 last:border-b-0 md:grid-cols-[1fr_auto] md:items-center ${isCompleted ? 'border-emerald-400/20 bg-emerald-500/10' : 'border-[#1d1d1d] bg-black'}`}>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <CircleDot className={`h-3.5 w-3.5 ${isCompleted ? 'text-emerald-300' : task.completionStatus === 'missed' ? 'text-red-400' : 'text-[#858585]'}`} />
+                <p className={`font-medium ${isCompleted ? 'text-emerald-100' : ''}`}>{task.title}</p>
+                <Badge>{task.priority}</Badge>
+                <Badge>{task.category}</Badge>
+                {isCompleted && <Badge>completed</Badge>}
+              </div>
+              <p className={`mt-1 text-sm ${isCompleted ? 'text-emerald-100/60' : 'text-[#858585]'}`}>{task.description || 'No description'}</p>
+              {!compact && <p className="mt-2 text-xs text-[#666]">Reminder {formatDate(task.reminderTime)} · Streak {task.streakCount}d · Strictness {task.aiStrictness}/10</p>}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button disabled={isCompleted} onClick={() => actions.completeTask(task._id)} className={actionClass}>{isCompleted ? 'Completed' : 'Complete'}</button>
+              {!compact && <button disabled={isCompleted} onClick={() => actions.markMissed(task._id)} className={actionClass}>Missed</button>}
+              {!compact && <button disabled={isCompleted} onClick={() => actions.snoozeTask(task._id)} className={actionClass}>Snooze</button>}
+              {onAlarm && <button disabled={isCompleted} onClick={() => onAlarm(task)} className={actionClass}>Alarm</button>}
+              {!compact && <button onClick={() => actions.deleteTask(task._id)} className="rounded-md border border-[#2a2a2a] px-3 py-2 text-sm text-[#fca5a5]"><Trash2 className="h-4 w-4" /></button>}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -571,8 +659,111 @@ function ScreenMessage({ title, body }) {
   return <main className="grid min-h-screen place-items-center bg-black px-4 text-white"><div className="rounded-lg border border-[#1d1d1d] bg-[#050505] p-6 text-center"><h1 className="font-semibold">{title}</h1><p className="mt-2 text-sm text-[#858585]">{body}</p></div></main>;
 }
 
-function AlarmOverlay({ task, onClose, onComplete }) {
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-black/90 p-5 backdrop-blur"><div className="w-full max-w-lg rounded-lg border border-[#2a2a2a] bg-[#050505] p-6 text-center shadow-2xl"><p className="text-sm text-[#858585]">Fullscreen Alarm Preview</p><div className="mx-auto my-6 grid h-36 w-36 place-items-center rounded-full border border-[#2a2a2a] bg-[#0a0a0a]"><span className="text-4xl font-semibold">{task?.reminderTime ? new Date(task.reminderTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span></div><h2 className="text-2xl font-semibold">{task?.title || 'Reminder'}</h2><p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#a1a1a1]">This is a UI preview. Delivery is persisted through the notification API and should be completed by native push/local scheduling on mobile.</p><div className="mt-6 grid gap-3 sm:grid-cols-2"><button onClick={onClose} className="rounded-md border border-[#2a2a2a] px-4 py-3 font-medium hover:bg-[#111]">Close</button>{task && <button onClick={onComplete} className="rounded-md bg-white px-4 py-3 font-medium text-black hover:bg-[#eaeaea]">Complete</button>}</div></div></div>;
+function AlarmOverlay({ task, notification, onClose, onSnooze, onComplete }) {
+  const [manualPlayCount, setManualPlayCount] = useState(0);
+  const [playbackBlocked, setPlaybackBlocked] = useState(false);
+  const setPlayingAudio = useNotificationStore((store) => store.setPlayingAudio);
+  const stopPlayingAudio = useNotificationStore((store) => store.stopPlayingAudio);
+
+  useEffect(() => {
+    let voice;
+    let repeatTimer;
+    let stopped = false;
+    const voiceUrl = notification?.voiceCacheUrl ? resolveAssetUrl(notification.voiceCacheUrl) : '';
+    const repeatDelay = 3000;
+
+    async function playVoice() {
+      if (!voiceUrl || stopped) return;
+      if (!voice) {
+        voice = new Audio(voiceUrl);
+        voice.crossOrigin = 'anonymous';
+        voice.preload = 'auto';
+        voice.volume = 1;
+        voice.loop = false;
+        voice.addEventListener('ended', scheduleReplay);
+      }
+
+      try {
+        setPlayingAudio({ notificationId: notification?._id || task?._id || 'preview', url: voiceUrl });
+        voice.currentTime = 0;
+        await voice.play();
+        setPlaybackBlocked(false);
+      } catch {
+        setPlaybackBlocked(true);
+        if (!stopped) {
+          scheduleReplay();
+        }
+      }
+    }
+
+    function scheduleReplay() {
+      if (stopped || !voiceUrl) return;
+      window.clearTimeout(repeatTimer);
+      repeatTimer = window.setTimeout(playVoice, repeatDelay);
+    }
+
+    playVoice();
+
+    return () => {
+      stopped = true;
+      window.clearTimeout(repeatTimer);
+      stopPlayingAudio();
+      if (voice) {
+        voice.removeEventListener('ended', scheduleReplay);
+        voice.pause();
+        voice.currentTime = 0;
+        voice.src = '';
+      }
+    };
+  }, [manualPlayCount, notification?._id, notification?.escalationLevel, notification?.voiceCacheUrl, setPlayingAudio, stopPlayingAudio, task?._id]);
+
+  const message = notification?.aiMessage || 'This is the moment you planned. Start now, before hesitation becomes the decision.';
+  const stage = notification?.reminderStage || (notification?.escalationLevel === 2 ? 'final-reminder' : notification?.escalationLevel === 1 ? 'second-reminder' : 'first-reminder');
+  const stageLabel = {
+    'first-reminder': 'First reminder',
+    'second-reminder': 'Second reminder',
+    'final-reminder': 'Final reminder'
+  }[stage] || 'Active reminder';
+  const stageTone = {
+    'first-reminder': 'border-[#2a2a2a] bg-[#050505]',
+    'second-reminder': 'border-amber-300/35 bg-[#080604]',
+    'final-reminder': 'border-red-300/40 bg-[#090303]'
+  }[stage] || 'border-[#2a2a2a] bg-[#050505]';
+  const waveformTone = stage === 'final-reminder' ? 'bg-red-200' : stage === 'second-reminder' ? 'bg-amber-200' : 'bg-white';
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-black/95 p-5 backdrop-blur">
+      <div className="absolute inset-x-0 top-0 h-40 bg-white/5 blur-3xl" />
+      <div className={`relative w-full max-w-lg rounded-lg border ${stageTone} p-6 text-center shadow-2xl`}>
+        <p className="text-sm uppercase tracking-[0.2em] text-[#858585]">{stageLabel}</p>
+        <div className="mx-auto my-6 grid h-36 w-36 place-items-center rounded-full border border-white/15 bg-[#0a0a0a] shadow-[0_0_60px_rgba(255,255,255,0.08)]">
+          <span className="text-4xl font-semibold">{task?.reminderTime ? new Date(task.reminderTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}</span>
+        </div>
+        <h2 className="text-2xl font-semibold">{task?.title || 'Reminder'}</h2>
+        <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#d4d4d4]">{message}</p>
+        <div className="mx-auto mt-6 flex h-16 max-w-sm items-center justify-center gap-1.5">
+          {[28, 48, 34, 58, 40, 64, 36, 54, 30, 60, 42, 50].map((height, index) => (
+            <span
+              key={index}
+              className={`w-2 rounded-full ${waveformTone} opacity-80 shadow-[0_0_18px_rgba(255,255,255,0.2)] motion-safe:animate-pulse`}
+              style={{ height, animationDelay: `${index * 90}ms` }}
+            />
+          ))}
+        </div>
+        {notification?.voiceCacheUrl
+          ? <div className="mt-5 space-y-2">
+              <button onClick={() => setManualPlayCount((count) => count + 1)} className="rounded-md border border-[#2a2a2a] px-4 py-2 text-sm text-[#d4d4d4] hover:bg-[#111]">Replay AI voice</button>
+              {playbackBlocked && <p className="text-xs text-amber-200">Browser blocked autoplay. Tap replay once to unlock the voice.</p>}
+            </div>
+          : <p className="mt-5 text-xs text-[#858585]">Add MP3 files to the stage audio folder. This reminder stays silent until custom voice audio exists.</p>}
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <button onClick={onClose} className="rounded-md border border-[#2a2a2a] px-4 py-3 font-medium hover:bg-[#111]">Acknowledge</button>
+          <button onClick={onSnooze} className="rounded-md border border-[#2a2a2a] px-4 py-3 font-medium hover:bg-[#111]">Snooze</button>
+          {task?._id && <button onClick={onComplete} className="rounded-md bg-white px-4 py-3 font-medium text-black hover:bg-[#eaeaea]">Complete</button>}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function formatDate(value) {
