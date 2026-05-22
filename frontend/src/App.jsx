@@ -669,7 +669,9 @@ function AlarmOverlay({ task, notification, onClose, onSnooze, onComplete }) {
     let voice;
     let repeatTimer;
     let stopped = false;
-    const voiceUrl = notification?.voiceCacheUrl ? resolveAssetUrl(notification.voiceCacheUrl) : '';
+    const stage = notification?.reminderStage || (notification?.escalationLevel === 2 ? 'final-reminder' : notification?.escalationLevel === 1 ? 'second-reminder' : 'first-reminder');
+    const fallbackVoiceUrl = `/assets/audio/${stage}/1.mp3`;
+    const voiceUrl = resolveAssetUrl(notification?.voiceCacheUrl || fallbackVoiceUrl);
     const repeatDelay = 3000;
 
     async function playVoice() {
@@ -715,7 +717,7 @@ function AlarmOverlay({ task, notification, onClose, onSnooze, onComplete }) {
         voice.src = '';
       }
     };
-  }, [manualPlayCount, notification?._id, notification?.escalationLevel, notification?.voiceCacheUrl, setPlayingAudio, stopPlayingAudio, task?._id]);
+  }, [manualPlayCount, notification?._id, notification?.escalationLevel, notification?.reminderStage, notification?.voiceCacheUrl, setPlayingAudio, stopPlayingAudio, task?._id]);
 
   const message = notification?.aiMessage || 'This is the moment you planned. Start now, before hesitation becomes the decision.';
   const stage = notification?.reminderStage || (notification?.escalationLevel === 2 ? 'final-reminder' : notification?.escalationLevel === 1 ? 'second-reminder' : 'first-reminder');
@@ -750,12 +752,10 @@ function AlarmOverlay({ task, notification, onClose, onSnooze, onComplete }) {
             />
           ))}
         </div>
-        {notification?.voiceCacheUrl
-          ? <div className="mt-5 space-y-2">
+        <div className="mt-5 space-y-2">
               <button onClick={() => setManualPlayCount((count) => count + 1)} className="rounded-md border border-[#2a2a2a] px-4 py-2 text-sm text-[#d4d4d4] hover:bg-[#111]">Replay AI voice</button>
               {playbackBlocked && <p className="text-xs text-amber-200">Browser blocked autoplay. Tap replay once to unlock the voice.</p>}
             </div>
-          : <p className="mt-5 text-xs text-[#858585]">Add MP3 files to the stage audio folder. This reminder stays silent until custom voice audio exists.</p>}
         <div className="mt-6 grid gap-3 sm:grid-cols-3">
           <button onClick={onClose} className="rounded-md border border-[#2a2a2a] px-4 py-3 font-medium hover:bg-[#111]">Acknowledge</button>
           <button onClick={onSnooze} className="rounded-md border border-[#2a2a2a] px-4 py-3 font-medium hover:bg-[#111]">Snooze</button>
