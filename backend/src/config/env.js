@@ -13,7 +13,7 @@ if (loaded.error && process.env.NODE_ENV !== 'production') {
   dotenv.config({ path: exampleEnvPath });
 }
 
-if (process.env.MONGODB_URI?.includes('cluster.mongodb.net')) {
+if (process.env.MONGODB_URI?.includes('user:password@cluster.mongodb.net')) {
   delete process.env.MONGODB_URI;
 }
 
