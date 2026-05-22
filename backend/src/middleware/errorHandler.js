@@ -4,8 +4,10 @@ export function errorHandler(error, req, res, next) {
   }
 
   if (error.name === 'ZodError') {
+    const details = error.issues.map((issue) => issue.message).join(', ');
+
     return res.status(400).json({
-      message: 'Invalid request body',
+      message: details || 'Invalid request body',
       issues: error.issues
     });
   }

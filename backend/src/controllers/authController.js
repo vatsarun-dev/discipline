@@ -4,14 +4,14 @@ import { User } from '../models/User.js';
 import { signToken } from '../utils/tokens.js';
 
 const signupSchema = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
-  password: z.string().min(8)
+  name: z.string().trim().min(2, 'Name must be at least 2 characters'),
+  email: z.string().trim().toLowerCase().email('Enter a valid email address'),
+  password: z.string().min(8, 'Password must be at least 8 characters')
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1)
+  email: z.string().trim().toLowerCase().email('Enter a valid email address'),
+  password: z.string().min(1, 'Password is required')
 });
 
 export async function signup(req, res) {
