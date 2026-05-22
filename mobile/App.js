@@ -1,6 +1,18 @@
-import { useMemo, useState } from 'react';
-import { Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
+import * as Notifications from 'expo-notifications';
+
+const apiOrigin = (process.env.EXPO_PUBLIC_API_URL || 'https://discipline-zgl3.onrender.com/api').replace(/\/api\/?$/, '').replace(/\/$/, '');
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false
+  })
+});
 
 const tasks = [
   { id: '1', title: 'Wake up on first alarm', time: '06:00', streak: 5, priority: 'critical' },
@@ -10,10 +22,56 @@ const tasks = [
 
 export default function App() {
   const [alarmVisible, setAlarmVisible] = useState(false);
+  const [activeAlarm, setActiveAlarm] = useState(null);
   const score = useMemo(() => 84, []);
 
+  useEffect(() => {
+    async function configureSilentNotifications() {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        shouldDuckAndroid: false
+      });
+
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('discipline_ai_voice_silent', {
+          name: 'AI voice reminders',
+          importance: Notifications.AndroidImportance.MAX,
+          sound: null,
+          vibrationPattern: null,
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC
+        });
+      }
+    }
+
+    configureSilentNotifications();
+
+    const showReminder = (notification) => {
+      const data = notification.request.content.data || {};
+      setActiveAlarm({
+        title: notification.request.content.title || 'DisciplineOS reminder',
+        body: notification.request.content.body || 'This is the moment you planned for.',
+        stage: data.reminderStage || 'first-reminder',
+        escalationLevel: Number(data.escalationLevel || 0),
+        voiceUrl: resolveVoiceUrl(data.voiceUrl || '')
+      });
+      setAlarmVisible(true);
+    };
+
+    const received = Notifications.addNotificationReceivedListener(showReminder);
+    const response = Notifications.addNotificationResponseReceivedListener((event) => {
+      showReminder(event.notification);
+    });
+
+    return () => {
+      received.remove();
+      response.remove();
+    };
+  }, []);
+
   if (alarmVisible) {
-    return <AlarmScreen onDismiss={() => setAlarmVisible(false)} />;
+    return <AlarmScreen alarm={activeAlarm} onDismiss={() => setAlarmVisible(false)} />;
   }
 
   return (
@@ -75,17 +133,69 @@ export default function App() {
   );
 }
 
-function AlarmScreen({ onDismiss }) {
+function resolveVoiceUrl(value) {
+  if (!value) return '';
+  if (/^https?:\/\//i.test(value)) return value;
+  return `${apiOrigin}${value.startsWith('/') ? value : `/${value}`}`;
+}
+
+function AlarmScreen({ alarm, onDismiss }) {
+  useEffect(() => {
+    let sound;
+    let replayTimer;
+    let mounted = true;
+
+    async function playVoice() {
+      if (!alarm?.voiceUrl) return;
+      try {
+        if (sound) {
+          await sound.replayAsync();
+          return;
+        }
+        const created = await Audio.Sound.createAsync(
+          { uri: alarm.voiceUrl },
+          { shouldPlay: true, volume: 1 }
+        );
+        if (!mounted) {
+          await created.sound.unloadAsync();
+          return;
+        }
+        sound = created.sound;
+        sound.setOnPlaybackStatusUpdate((status) => {
+          if (!mounted || !status.isLoaded || !status.didJustFinish) return;
+          clearTimeout(replayTimer);
+          replayTimer = setTimeout(playVoice, 3000);
+        });
+      } catch {
+        // Keep notification silent when the custom voice URL cannot be loaded.
+      }
+    }
+
+    playVoice();
+
+    return () => {
+      mounted = false;
+      clearTimeout(replayTimer);
+      if (sound) {
+        sound.setOnPlaybackStatusUpdate(null);
+        sound.stopAsync().finally(() => sound.unloadAsync());
+      }
+    };
+  }, [alarm?.voiceUrl]);
+
+  const stage = alarm?.stage || 'first-reminder';
+  const stageLabel = stage === 'final-reminder' ? 'Final Reminder' : stage === 'second-reminder' ? 'Second Reminder' : 'First Reminder';
+
   return (
     <SafeAreaView style={styles.alarmScreen}>
       <StatusBar barStyle="light-content" />
-      <Text style={styles.alarmKicker}>Fullscreen Alarm</Text>
+      <Text style={styles.alarmKicker}>{stageLabel}</Text>
       <View style={styles.alarmOrb}>
         <Text style={styles.alarmTime}>09:30</Text>
       </View>
-      <Text style={styles.alarmTitle}>Deep work sprint</Text>
+      <Text style={styles.alarmTitle}>{alarm?.title || 'Deep work sprint'}</Text>
       <Text style={styles.alarmCopy}>
-        This is the exact moment you planned for. Do not teach your brain that pressure means escape.
+        {alarm?.body || 'This is the exact moment you planned for. Do not teach your brain that pressure means escape.'}
       </Text>
       <Waveform large />
       <View style={styles.alarmActions}>

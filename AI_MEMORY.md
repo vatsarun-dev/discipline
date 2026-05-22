@@ -17,6 +17,7 @@
 - Auth uses `disciplineos_token` in localStorage and restores sessions through `GET /api/auth/me`.
 - Frontend API functions live in `frontend/src/lib/api.js`.
 - Web API default is `https://discipline-zgl3.onrender.com/api`; local development can override with `frontend/.env` and `VITE_API_URL=http://localhost:5000/api`.
+- Backend CORS reads comma-separated `CLIENT_ORIGIN`/`CLIENT_ORIGINS` values and allows Vercel preview hosts beginning with `discipline-frontend-`.
 - Backend activity CRUD lives under `/api/activities`.
 - AI Coach uses `GEMINI_MODEL`, defaulting to `gemini-2.0-flash`, and returns a fallback response instead of failing the route when Gemini rejects the request.
 - AI Coach also supports Groq via `AI_PROVIDER=groq`, `GROQ_API_KEY`, and `GROQ_MODEL`. Keep real provider keys only in `backend/.env`.
