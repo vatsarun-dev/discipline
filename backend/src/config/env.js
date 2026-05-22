@@ -20,6 +20,7 @@ if (process.env.MONGODB_URI?.includes('user:password@cluster.mongodb.net')) {
 export const env = {
   port: process.env.PORT || 5000,
   nodeEnv: process.env.NODE_ENV || 'development',
+  apiPublicUrl: process.env.API_PUBLIC_URL || process.env.PUBLIC_API_URL || process.env.RENDER_EXTERNAL_URL,
   mongodbUri: process.env.MONGODB_URI,
   jwtSecret: process.env.JWT_SECRET || 'development-secret',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',

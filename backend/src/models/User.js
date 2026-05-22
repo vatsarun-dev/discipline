@@ -25,7 +25,14 @@ const userSchema = new mongoose.Schema(
     googleAuth: {
       providerId: String,
       email: String
-    }
+    },
+    deviceTokens: [
+      {
+        token: { type: String, required: true },
+        platform: { type: String, enum: ['expo', 'fcm', 'web', 'ios', 'android', 'unknown'], default: 'unknown' },
+        updatedAt: { type: Date, default: Date.now }
+      }
+    ]
   },
   { timestamps: true }
 );

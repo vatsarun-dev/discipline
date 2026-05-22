@@ -8,8 +8,10 @@ export async function getDashboardSummary(userId) {
     Activity.find({ userId }).sort({ occurredAt: -1 }).limit(300)
   ]);
 
-  const completedTasks = tasks.filter((task) => task.completionStatus === 'completed').length;
-  const missedTasks = tasks.filter((task) => task.completionStatus === 'missed').length;
+  const completedTasks = recentActivities.filter((activity) => activity.type === 'task_completed').length
+    || tasks.filter((task) => task.completionStatus === 'completed').length;
+  const missedTasks = recentActivities.filter((activity) => activity.type === 'task_missed').length
+    || tasks.filter((task) => task.completionStatus === 'missed').length;
   const pendingTasks = tasks.filter((task) => task.completionStatus === 'pending').length;
   const snoozes = recentActivities.filter((activity) => activity.type === 'snoozed').length;
   const delayedCompletions = recentActivities.filter((activity) => activity.type === 'task_delayed').length;
@@ -23,6 +25,8 @@ export async function getDashboardSummary(userId) {
     snoozes
   });
 
+  const recordedOutcomes = completedTasks + missedTasks + delayedCompletions;
+
   return {
     totalTasks: tasks.length,
     completedTasks,
@@ -32,7 +36,7 @@ export async function getDashboardSummary(userId) {
     longestStreak,
     disciplineScore,
     lazinessScore: calculateLazinessScore({ disciplineScore, delayedCompletions, wakeFailures }),
-    consistencyPercentage: tasks.length ? Math.round((completedTasks / tasks.length) * 100) : 0,
+    consistencyPercentage: recordedOutcomes ? Math.round((completedTasks / recordedOutcomes) * 100) : 0,
     activeHours,
     delayedCompletions,
     wakeFailures,

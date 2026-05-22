@@ -6,7 +6,7 @@ const activitySchema = new mongoose.Schema(
     taskId: { type: mongoose.Schema.Types.ObjectId, ref: 'Task' },
     type: {
       type: String,
-      enum: ['task_completed', 'task_missed', 'task_delayed', 'wake_failed', 'snoozed', 'excuse_logged', 'alarm_acknowledged'],
+      enum: ['task_created', 'task_completed', 'task_missed', 'task_delayed', 'task_deleted', 'wake_failed', 'snoozed', 'excuse_logged', 'alarm_acknowledged'],
       required: true
     },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },

@@ -18,6 +18,22 @@ export async function generateVoice({ text, voiceId = env.elevenLabsDefaultVoice
     };
   }
 
+  await fs.mkdir(voiceCacheDir, { recursive: true });
+  const fileName = `${crypto.createHash('sha1').update(`${voiceId}:${text}`).digest('hex')}.mp3`;
+  const filePath = path.join(voiceCacheDir, fileName);
+
+  try {
+    await fs.access(filePath);
+    return {
+      audioUrl: `/voice-cache/${fileName}`,
+      filePath,
+      cached: true,
+      provider: 'elevenlabs'
+    };
+  } catch {
+    // Cache miss; generate below.
+  }
+
   const response = await axios.post(
     `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
     {
@@ -39,9 +55,6 @@ export async function generateVoice({ text, voiceId = env.elevenLabsDefaultVoice
     }
   );
 
-  await fs.mkdir(voiceCacheDir, { recursive: true });
-  const fileName = `${crypto.createHash('sha1').update(`${voiceId}:${text}`).digest('hex')}.mp3`;
-  const filePath = path.join(voiceCacheDir, fileName);
   await fs.writeFile(filePath, Buffer.from(response.data));
 
   return {
